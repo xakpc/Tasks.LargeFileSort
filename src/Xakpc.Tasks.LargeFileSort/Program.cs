@@ -23,10 +23,16 @@ if (string.Equals(inputFilePath, outputFilePath, StringComparison.OrdinalIgnoreC
     return 1;
 }
 
+var staleDirectories = SortingService.DeleteStaleWorkingDirectories();
+if (staleDirectories > 0)
+{
+    AnsiConsole.MarkupLineInterpolated($"Removed {staleDirectories} temp folder(s) left by interrupted runs.");
+}
+
 var stopwatch = Stopwatch.StartNew();
 SortedChunks chunks = null!;
 
-await AnsiConsole.Progress()
+AnsiConsole.Progress()
     .Columns(
     [
         new TaskDescriptionColumn(),
@@ -35,18 +41,18 @@ await AnsiConsole.Progress()
         new ElapsedTimeColumn(),
         new SpinnerColumn()
     ])
-    .StartAsync(async ctx =>
+    .Start(ctx =>
     {
         var build = ctx.AddTask("Building sorted chunks");
         var merge = ctx.AddTask("Merging chunks", autoStart: false);
 
         using var sortingService = new SortingService();
 
-        chunks = await sortingService.BuildSortedChunksAsync(
+        chunks = sortingService.BuildSortedChunks(
             inputFilePath, new Progress<double>(value => build.Value = value));
 
         merge.StartTask();
-        await sortingService.MergeChunksAsync(
+        sortingService.MergeChunks(
             chunks, outputFilePath, new Progress<double>(value => merge.Value = value));
     });
 

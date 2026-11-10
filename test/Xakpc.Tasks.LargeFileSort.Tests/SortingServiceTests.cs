@@ -121,20 +121,20 @@ public class SortingServiceTests
     }
 
     [Fact]
-    public async Task BuildSortedChunksAsync_MissingFile_ThrowsFileNotFoundException()
+    public void BuildSortedChunks_MissingFile_ThrowsFileNotFoundException()
     {
         // Arrange
         using var temp = new TempDirectory();
         using var sut = new SortingService();
 
         // Act & Assert
-        await Assert.ThrowsAsync<FileNotFoundException>(() => sut.BuildSortedChunksAsync(temp.File("missing.txt"), null));
+        Assert.Throws<FileNotFoundException>(() => sut.BuildSortedChunks(temp.File("missing.txt"), null));
     }
 
     [Theory]
     [InlineData(new[] { "1. a", "2. b", "3. c", "4. d", "5. e" }, new[] { 2, 2, 1 })] // leftover row is written
     [InlineData(new[] { "1. a", "2. b", "3. c", "4. d" }, new[] { 2, 2 })]            // no empty extra chunk
-    public async Task BuildSortedChunksAsync_LineCountVsChunkSize_WritesExpectedChunks(
+    public async Task BuildSortedChunks_LineCountVsChunkSize_WritesExpectedChunks(
         string[] input, int[] expectedLinesPerChunk)
     {
         // Arrange
@@ -146,7 +146,7 @@ public class SortingServiceTests
         using var sut = new SortingService(twoLinesChunkSize);
 
         // Act
-        var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
+        var chunks = sut.BuildSortedChunks(inputFile, null);
 
         // Assert
         Assert.Equal(expectedLinesPerChunk, chunks.Paths.Select(c => File.ReadAllLines(c).Length));
@@ -161,7 +161,7 @@ public class SortingServiceTests
         var inputFile = temp.File(InputFileName);
         await File.WriteAllLinesAsync(inputFile, ["1. a"]);
         var sut = new SortingService();
-        var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
+        var chunks = sut.BuildSortedChunks(inputFile, null);
 
         // Act
         sut.Dispose();
@@ -170,6 +170,24 @@ public class SortingServiceTests
         Assert.StartsWith(Path.GetTempPath(), sut.WorkingDirectory);
         Assert.False(Directory.Exists(sut.WorkingDirectory));
         Assert.All(chunks.Paths, path => Assert.False(File.Exists(path)));
+    }
+
+    [Fact]
+    public void DeleteStaleWorkingDirectories_DeletesAbandonedAndKeepsRunning()
+    {
+        // Arrange
+        var abandoned = Path.Combine(Path.GetTempPath(), $"LargeFileSort-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(abandoned);
+        File.WriteAllText(Path.Combine(abandoned, "chunk-00000.txt"), "1. a");
+        using var running = new SortingService();
+
+        // Act
+        var deleted = SortingService.DeleteStaleWorkingDirectories();
+
+        // Assert
+        Assert.True(deleted >= 1);
+        Assert.False(Directory.Exists(abandoned));
+        Assert.True(Directory.Exists(running.WorkingDirectory));
     }
 
     /// <summary>
@@ -184,8 +202,8 @@ public class SortingServiceTests
         await File.WriteAllLinesAsync(inputFile, inputLines);
 
         using var sut = new SortingService(chunkSize);
-        var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
-        await sut.MergeChunksAsync(chunks, outputFile, null);
+        var chunks = sut.BuildSortedChunks(inputFile, null);
+        sut.MergeChunks(chunks, outputFile, null);
 
         return (await File.ReadAllLinesAsync(outputFile), chunks);
     }
