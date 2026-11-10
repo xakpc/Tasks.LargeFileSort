@@ -35,7 +35,7 @@ var result = AnsiConsole.Progress()
     {
         var generate = ctx.AddTask("Generating", maxValue: fileSizeBytes);
         var progress = new Progress<double>(value => generate.Value = value);
-        var generator = new Generator(words, filePath, fileSizeBytes);
+        var generator = new PhraseGenerator(words, filePath, fileSizeBytes);
         return generator.Generate(progress);
     });
 

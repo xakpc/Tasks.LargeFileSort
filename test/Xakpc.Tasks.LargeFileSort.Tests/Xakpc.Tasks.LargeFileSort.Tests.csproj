@@ -19,4 +19,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Xakpc.Tasks.LargeFileSort\Xakpc.Tasks.LargeFileSort.csproj" />
+    <ProjectReference Include="..\..\src\Xakpc.Tasks.LargeFileSort.Generator\Xakpc.Tasks.LargeFileSort.Generator.csproj" />
+  </ItemGroup>
+
 </Project>

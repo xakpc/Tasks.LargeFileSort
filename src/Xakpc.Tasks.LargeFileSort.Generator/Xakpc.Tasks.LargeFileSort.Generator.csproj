@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Xakpc.Tasks.LargeFileSort.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="google-10000-english-no-swears.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

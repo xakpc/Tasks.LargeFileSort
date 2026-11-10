@@ -2,12 +2,15 @@
 
 namespace Xakpc.Tasks.LargeFileSort.Generator.Services;
 
-interface IGenerator
+interface IPhraseGenerator
 {
+    /// <summary>
+    /// Generate test file with random words and phrases, reporting progress as a percentage of the total file size.
+    /// </summary>
     GenerateResult Generate(IProgress<double> progress);
 }
 
-internal class Generator : IGenerator
+internal class PhraseGenerator : IPhraseGenerator
 {
     private readonly string _filePath;
     private readonly string[] _words;
@@ -16,7 +19,7 @@ internal class Generator : IGenerator
 
     const int Seed = 46;
 
-    public Generator(string[] words, string filePath, ulong fileSizeBytes)
+    public PhraseGenerator(string[] words, string filePath, ulong fileSizeBytes)
     {
         ArgumentNullException.ThrowIfNull(words, nameof(words));
         if (words.Length==0)

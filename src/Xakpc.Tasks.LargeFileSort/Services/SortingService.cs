@@ -21,18 +21,20 @@ public class SortingService : ISortingService, IDisposable
 {
     private readonly string _tempFilesDirectory;
     private readonly DataRowComparer _comparer;
-    private const int ChunkSize = 512*1024*1024; // 512 MB
+    private readonly int _chunkSize;
 
-    
-    public SortingService(string tempFilesDirectory)
+    public SortingService(string tempFilesDirectory, int chunkSize = 512*1024*1024)
     {
         if (!Directory.Exists(tempFilesDirectory))
         {
             Directory.CreateDirectory(tempFilesDirectory);
         }
 
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
+
         _tempFilesDirectory = tempFilesDirectory;
         _comparer = new DataRowComparer();
+        _chunkSize = chunkSize;
     }
     
     /// <inheritdoc/>
@@ -45,12 +47,11 @@ public class SortingService : ISortingService, IDisposable
 
         var list = new List<DataRow>();
         var sortedChunks = new List<string>();
+        var processedBytes = 0L;
+        var currentChunkSize = 0;
 
         var totalBytes = GetFileSize(filePath);
-        var processedBytes = 0L;
 
-        int currentChunkSize = 0;
-        var streamReader = new StreamReader(filePath);
         await foreach (var str in File.ReadLinesAsync(filePath))
         {
             var row = ParseLine(str);
@@ -63,7 +64,7 @@ public class SortingService : ISortingService, IDisposable
 
             currentChunkSize += str.Length + Environment.NewLine.Length;
 
-            if (currentChunkSize >= ChunkSize)
+            if (currentChunkSize >= _chunkSize)
             {
                 ProcessChunk();
                 list = [];
@@ -149,7 +150,7 @@ public class SortingService : ISortingService, IDisposable
         }
     }
 
-    private long GetFileSize(string filePath)
+    private static long GetFileSize(string filePath)
     {
         long fileSize = 0;
         if (File.Exists(filePath))
@@ -163,14 +164,14 @@ public class SortingService : ISortingService, IDisposable
 
     private static DataRow? ParseLine(string line)
     {
-        var parts = line.Split(". ");
+        // split on the first ". " only - text itself may contain ". "
+        var parts = line.Split(". ", 2);
 
-        if (parts.Length < 2)
+        if (parts.Length < 2 || !ulong.TryParse(parts[0], out var number))
         {
             return null; // reject bad rows
         }
 
-        var number = ulong.Parse(parts[0]);
         var text = parts[1].Trim();
         return new DataRow(number, text);
     }
@@ -182,6 +183,4 @@ public class SortingService : ISortingService, IDisposable
             Directory.Delete(_tempFilesDirectory, recursive: true);
         }
     }
-
-
 }
