@@ -9,87 +9,115 @@ public class SortingServiceTests
     private const string OutputFileName = "output.txt";
     private const int DefaultChunkSize = 1024 * 1024;
 
-    private static readonly string[] SampleInput =
-    [
-        "415. Apple",
-        "30432. Something something something",
-        "1. Apple",
-        "32. Cherry is the best",
-        "2. Banana is yellow",
-    ];
+    // a chunk size of 1 forces every line into its own chunk, so the merge does all the work
+    private const int OneLinePerChunk = 1;
 
-    private static readonly string[] SampleSorted =
-    [
-        "1. Apple",
-        "415. Apple",
-        "2. Banana is yellow",
-        "32. Cherry is the best",
-        "30432. Something something something",
-    ];
-
-    [Fact]
-    public async Task SortAsync_SampleInput_ReturnsSortedLines()
-    {
-        // Act
-        var actual = await SortAsync(SampleInput);
-
-        // Assert
-        Assert.Equal(SampleSorted, actual);
-    }
-
-    [Fact]
-    public async Task SortAsync_TextContainsDotSpace_PreservesFullText()
+    [Theory]
+    [InlineData(DefaultChunkSize)]
+    [InlineData(OneLinePerChunk)]
+    public async Task Sort_TaskExample_ReturnsExpectedOutput(int chunkSize)
     {
         // Arrange
-        const string lineWithDotInText = "1. Hello. World";
-        const string plainLine = "2. Zebra";
+        string[] input = ["415. Apple", "30432. Something something something", "1. Apple", "32. Cherry is the best", "2. Banana is yellow"];
+        string[] expected = ["1. Apple", "415. Apple", "2. Banana is yellow", "32. Cherry is the best", "30432. Something something something"];
 
         // Act
-        var actual = await SortAsync([plainLine, lineWithDotInText]);
+        var (output, _) = await SortAsync(input, chunkSize);
 
         // Assert
-        Assert.Equal([lineWithDotInText, plainLine], actual);
+        Assert.Equal(expected, output);
     }
 
-    [Fact]
-    public async Task SortAsync_MalformedLines_SkipsThem()
+    [Theory]
+    [InlineData(DefaultChunkSize)]
+    [InlineData(OneLinePerChunk)]
+    public async Task Sort_DuplicateLinesAndNumbers_KeepsAllOfThem(int chunkSize)
     {
         // Arrange
-        const string noSeparator = "no separator here";
-        const string notANumber = "abc. not a number";
-        const string validLine = "1. Apple";
+        string[] input = ["3. Apple", "1. Banana", "3. Apple", "5. Banana", "1. Apple", "3. Apple"];
+        string[] expected = ["1. Apple", "3. Apple", "3. Apple", "3. Apple", "1. Banana", "5. Banana"];
 
         // Act
-        var actual = await SortAsync([noSeparator, notANumber, validLine]);
+        var (output, _) = await SortAsync(input, chunkSize);
 
         // Assert
-        Assert.Equal([validLine], actual);
+        Assert.Equal(expected, output);
     }
 
     [Fact]
-    public async Task SortAsync_EmptyFile_ReturnsEmptyOutput()
-    {
-        // Act
-        var actual = await SortAsync([]);
-
-        // Assert
-        Assert.Empty(actual);
-    }
-
-    [Fact]
-    public async Task SortAsync_DuplicateTextAcrossChunks_ReturnsGloballySortedLines()
+    public async Task Sort_UnusualButValidLines_WritesThemUnchanged()
     {
         // Arrange
-        // chunk size of 1 byte forces every line into its own chunk, so the merge does all the work
-        const int oneLinePerChunk = 1;
-        string[] input = ["3. Apple", "1. Banana", "2. Apple", "5. Banana", "4. Apple"];
-        string[] expected = ["2. Apple", "3. Apple", "4. Apple", "1. Banana", "5. Banana"];
+        string[] input =
+        [
+            "2. Zebra",
+            "1. Hello. World",
+            "1.  padded ",
+            "123456789012345678901234567890. Big",
+            "007. Big",
+        ];
+        string[] expected =
+        [
+            "1.  padded ",
+            "007. Big",
+            "123456789012345678901234567890. Big",
+            "1. Hello. World",
+            "2. Zebra",
+        ];
 
         // Act
-        var actual = await SortAsync(input, oneLinePerChunk);
+        var (output, _) = await SortAsync(input);
 
         // Assert
-        Assert.Equal(expected, actual);
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public async Task Sort_MalformedLines_SkipsAndCountsThem()
+    {
+        // Arrange
+        string[] input = ["no separator here", "2. Banana", "abc. not a number", "", "1. Apple"];
+
+        // Act
+        var (output, chunks) = await SortAsync(input);
+
+        // Assert
+        Assert.Equal(["1. Apple", "2. Banana"], output);
+        Assert.Equal(2, chunks.LineCount);
+        Assert.Equal(3, chunks.SkippedLines);
+    }
+
+    [Fact]
+    public async Task Sort_EmptyFile_ReturnsEmptyOutput()
+    {
+        // Act
+        var (output, chunks) = await SortAsync([]);
+
+        // Assert
+        Assert.Empty(output);
+        Assert.Empty(chunks.Paths);
+    }
+
+    [Fact]
+    public async Task Sort_RandomInput_MatchesInMemorySort()
+    {
+        // Arrange
+        var random = new Random(42);
+        string[] words = ["apple", "Apple", "banana", "cherry", "a", ""];
+        var input = Enumerable.Range(0, 2_000)
+            .Select(_ => $"{random.Next(0, 50)}. {words[random.Next(words.Length)]} {words[random.Next(words.Length)]}")
+            .ToArray();
+        var expected = input
+            .OrderBy(l => l[(l.IndexOf(". ", StringComparison.Ordinal) + 2)..], StringComparer.Ordinal)
+            .ThenBy(l => int.Parse(l[..l.IndexOf(". ", StringComparison.Ordinal)]))
+            .ToArray();
+
+        // Act
+        var (output, chunks) = await SortAsync(input, chunkSize: 1_000);
+
+        // Assert
+        Assert.True(chunks.Paths.Count > 1, "the input should span several chunks");
+        Assert.Equal(expected, output);
     }
 
     [Fact]
@@ -97,11 +125,10 @@ public class SortingServiceTests
     {
         // Arrange
         using var temp = new TempDirectory();
-        using var sut = new SortingService(temp.Path);
-        var missingFile = temp.File("missing.txt");
+        using var sut = new SortingService();
 
         // Act & Assert
-        await Assert.ThrowsAsync<FileNotFoundException>(() => sut.BuildSortedChunksAsync(missingFile, null));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => sut.BuildSortedChunksAsync(temp.File("missing.txt"), null));
     }
 
     [Theory]
@@ -116,30 +143,50 @@ public class SortingServiceTests
         using var temp = new TempDirectory();
         var inputFile = temp.File(InputFileName);
         await File.WriteAllLinesAsync(inputFile, input);
-        using var sut = new SortingService(temp.Path, twoLinesChunkSize);
+        using var sut = new SortingService(twoLinesChunkSize);
 
         // Act
         var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
 
         // Assert
-        Assert.Equal(expectedLinesPerChunk, chunks.Select(c => File.ReadAllLines(c).Length));
-        Assert.Equal(input, chunks.SelectMany(File.ReadAllLines));
+        Assert.Equal(expectedLinesPerChunk, chunks.Paths.Select(c => File.ReadAllLines(c).Length));
+        Assert.Equal(input, chunks.Paths.SelectMany(File.ReadAllLines));
+    }
+
+    [Fact]
+    public async Task Dispose_DeletesWorkingDirectoryWithChunks()
+    {
+        // Arrange
+        using var temp = new TempDirectory();
+        var inputFile = temp.File(InputFileName);
+        await File.WriteAllLinesAsync(inputFile, ["1. a"]);
+        var sut = new SortingService();
+        var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
+
+        // Act
+        sut.Dispose();
+
+        // Assert
+        Assert.StartsWith(Path.GetTempPath(), sut.WorkingDirectory);
+        Assert.False(Directory.Exists(sut.WorkingDirectory));
+        Assert.All(chunks.Paths, path => Assert.False(File.Exists(path)));
     }
 
     /// <summary>
     /// Runs the full sort pipeline (chunk + merge) on the given lines and returns the output lines.
     /// </summary>
-    private static async Task<string[]> SortAsync(string[] inputLines, int chunkSize = DefaultChunkSize)
+    private static async Task<(string[] Output, SortedChunks Chunks)> SortAsync(
+        string[] inputLines, int chunkSize = DefaultChunkSize)
     {
         using var temp = new TempDirectory();
         var inputFile = temp.File(InputFileName);
         var outputFile = temp.File(OutputFileName);
         await File.WriteAllLinesAsync(inputFile, inputLines);
 
-        using var sut = new SortingService(temp.Path, chunkSize);
+        using var sut = new SortingService(chunkSize);
         var chunks = await sut.BuildSortedChunksAsync(inputFile, null);
-        await sut.MergeChunksAsync(chunks, outputFile);
+        await sut.MergeChunksAsync(chunks, outputFile, null);
 
-        return await File.ReadAllLinesAsync(outputFile);
+        return (await File.ReadAllLinesAsync(outputFile), chunks);
     }
 }

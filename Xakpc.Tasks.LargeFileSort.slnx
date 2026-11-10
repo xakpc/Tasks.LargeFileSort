@@ -1,5 +1,8 @@
 <Solution>
   <Project Path="src/Xakpc.Tasks.LargeFileSort.Generator/Xakpc.Tasks.LargeFileSort.Generator.csproj" />
   <Project Path="src/Xakpc.Tasks.LargeFileSort/Xakpc.Tasks.LargeFileSort.csproj" />
-  <Project Path="test/Xakpc.Tasks.LargeFileSort.Tests/Xakpc.Tasks.LargeFileSort.Tests.csproj" />
+  <Folder Name="/Tests/">
+    <Project Path="bench/Xakpc.Tasks.LargeFileSort.Benchmarks/Xakpc.Tasks.LargeFileSort.Benchmarks.csproj" />
+    <Project Path="test/Xakpc.Tasks.LargeFileSort.Tests/Xakpc.Tasks.LargeFileSort.Tests.csproj" />
+  </Folder>
 </Solution>

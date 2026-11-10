@@ -1,186 +1,165 @@
-﻿using Spectre.Console;
+﻿namespace Xakpc.Tasks.LargeFileSort.Services;
 
-namespace Xakpc.Tasks.LargeFileSort.Services;
+/// <summary>Result of splitting the input into sorted chunk files.</summary>
+/// <param name="Paths">Sorted chunk files, in creation order.</param>
+/// <param name="LineCount">Number of valid lines written to the chunks.</param>
+/// <param name="SkippedLines">Number of input lines that did not match the expected format.</param>
+internal sealed record SortedChunks(IReadOnlyList<string> Paths, long LineCount, long SkippedLines);
 
-internal interface ISortingService
+/// <summary>
+/// External merge sort: split the input into sorted chunk files that fit in memory, then k-way merge them.
+/// </summary>
+/// <remarks>
+/// Chunk files are written to a unique subdirectory of the system temp directory (set the <c>TEMP</c>
+/// environment variable to use another drive); <see cref="Dispose"/> deletes only that subdirectory.
+/// </remarks>
+internal sealed class SortingService : IDisposable
 {
-    /// <summary>
-    /// Create multiple sorted temporary files (chunks)
-    /// </summary>
-    Task<IList<string> > BuildSortedChunksAsync(string inputFilePath, IProgress<double> progress);
-
-    /// <summary>
-    /// Merge sorted chunks together to a final file
-    /// </summary>
-    /// <param name="chunks"></param>
-    /// <param name="outputFilePath"></param>
-    Task MergeChunksAsync(IList<string> chunks, string outputFilePath);
-}
-
-public class SortingService : ISortingService, IDisposable
-{
-    private readonly string _tempFilesDirectory;
-    private readonly DataRowComparer _comparer;
     private readonly int _chunkSize;
 
-    public SortingService(string tempFilesDirectory, int chunkSize = 512*1024*1024)
-    {
-        if (!Directory.Exists(tempFilesDirectory))
-        {
-            Directory.CreateDirectory(tempFilesDirectory);
-        }
+    public string WorkingDirectory { get; }
 
+    /// <param name="chunkSize">Chunk size to for merge.</param>
+    public SortingService(int chunkSize = 512 * 1024 * 1024)
+    {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
 
-        _tempFilesDirectory = tempFilesDirectory;
-        _comparer = new DataRowComparer();
         _chunkSize = chunkSize;
+        WorkingDirectory = Path.Combine(Path.GetTempPath(), $"LargeFileSort-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(WorkingDirectory);
     }
-    
-    /// <inheritdoc/>
-    public async Task<IList<string>> BuildSortedChunksAsync(string filePath, IProgress<double>? progress)
+
+    /// <summary>
+    /// Reads the input file and writes it as a set of sorted chunk files.
+    /// Lines that do not match the expected format are skipped and counted.
+    /// </summary>
+    public async Task<SortedChunks> BuildSortedChunksAsync(string inputFilePath, IProgress<double>? progress)
     {
-        if (!File.Exists(filePath))
+        if (!File.Exists(inputFilePath))
         {
-            throw new FileNotFoundException($"The file '{filePath}' does not exist.");
+            throw new FileNotFoundException($"The file '{inputFilePath}' does not exist.", inputFilePath);
         }
 
-        var list = new List<DataRow>();
-        var sortedChunks = new List<string>();
-        var processedBytes = 0L;
-        var currentChunkSize = 0;
+        var totalChars = Math.Max(1L, new FileInfo(inputFilePath).Length);
+        var rows = new List<DataRow>();
+        var chunkPaths = new List<string>();
+        var processedChars = 0L;
+        var currentChunkSize = 0L;
+        var lineCount = 0L;
+        var skippedLines = 0L;
 
-        var totalBytes = GetFileSize(filePath);
-
-        await foreach (var str in File.ReadLinesAsync(filePath))
+        await foreach (var line in File.ReadLinesAsync(inputFilePath))
         {
-            var row = ParseLine(str);
-            if (row == null)
+            // the size accounting is only used for chunking and progress, so an approximate newline length is fine
+            currentChunkSize += line.Length + Environment.NewLine.Length;
+
+            if (!DataRow.TryParse(line, out var row))
             {
-                continue; // skip bad rows
+                skippedLines++;
+                continue;
             }
 
-            list.Add(row.Value);
-
-            currentChunkSize += str.Length + Environment.NewLine.Length;
+            rows.Add(row);
 
             if (currentChunkSize >= _chunkSize)
             {
-                ProcessChunk();
-                list = [];
+                WriteChunk();
             }
         }
 
-        // process leftovers
-        if (list.Count > 0)
+        if (rows.Count > 0)
         {
-            ProcessChunk();
+            WriteChunk();
         }
 
-        return sortedChunks;
+        progress?.Report(100);
+        return new SortedChunks(chunkPaths, lineCount, skippedLines);
 
-        void ProcessChunk()
+        void WriteChunk()
         {
-            list.Sort(_comparer);
+            rows.Sort(DataRowComparer.Instance);
 
-            var tempPath = Path.Combine(_tempFilesDirectory, Path.GetRandomFileName());
-            File.WriteAllLines(tempPath, list.Select(x => $"{x.Number}. {x.Text}"));
-            sortedChunks.Add(tempPath);
+            var chunkPath = Path.Combine(WorkingDirectory, $"chunk-{chunkPaths.Count:D5}.txt");
+            File.WriteAllLines(chunkPath, rows.Select(r => r.Line));
+            chunkPaths.Add(chunkPath);
+            lineCount += rows.Count;
+            rows = [];
 
-            processedBytes += currentChunkSize;
-            progress?.Report(processedBytes * 100.0 / totalBytes);
-
+            processedChars += currentChunkSize;
             currentChunkSize = 0;
+            progress?.Report(Math.Min(100.0, processedChars * 100.0 / totalChars));
         }
     }
 
-    /// <inheritdoc/>
-    public async Task MergeChunksAsync(IList<string> chunks, string outputFilePath)
+    /// <summary>
+    /// K-way merges sorted chunk files into the output file.
+    /// </summary>
+    public async Task MergeChunksAsync(SortedChunks chunks, string outputFilePath, IProgress<double>? progress)
     {
-        // we store the data in priority quest, with index of chunk where it comes from
-        var priorityQueue = new PriorityQueue<(DataRow Row, int ChunkIndex), DataRow>(_comparer);
-
-        var chunkReaders = new List<StreamReader>(chunks.Count);
+        // element: the row and the index of the chunk it came from; priority: the row itself
+        var queue = new PriorityQueue<(DataRow Row, int ChunkIndex), DataRow>(DataRowComparer.Instance);
+        var readers = new List<StreamReader>(chunks.Paths.Count);
 
         try
         {
-            foreach (var chunk in chunks)
+            foreach (var path in chunks.Paths)
             {
-                var reader = new StreamReader(chunk);
-                chunkReaders.Add(reader);
+                readers.Add(new StreamReader(path));
             }
 
-            // Initialize the priority queue with the first line from each chunk
-            for (int i = 0; i < chunkReaders.Count; i++)
+            for (var i = 0; i < readers.Count; i++)
             {
-                var line = await chunkReaders[i].ReadLineAsync();
-                if (line != null)
+                await EnqueueNextRowAsync(i);
+            }
+
+            await using var writer = new StreamWriter(outputFilePath, append: false);
+            var mergedLines = 0L;
+            var reportEvery = Math.Max(1L, chunks.LineCount / 100);
+
+            while (queue.TryDequeue(out var item, out _))
+            {
+                await writer.WriteLineAsync(item.Row.Line);
+                await EnqueueNextRowAsync(item.ChunkIndex);
+
+                if (++mergedLines % reportEvery == 0)
                 {
-                    var row = ParseLine(line)!.Value; // should not have bad rows anymore
-                    priorityQueue.Enqueue((row, i), row); // sort by text first, then number!
+                    progress?.Report(Math.Min(100.0, mergedLines * 100.0 / chunks.LineCount));
                 }
             }
 
-            using var writer = new StreamWriter(outputFilePath, append: false);
-
-            // K-way merge: repeatedly extract the smallest element and add the next element from the same chunk
-            while (priorityQueue.Count > 0)
-            {
-                var (Row, ChunkIndex) = priorityQueue.Dequeue();
-
-                await writer.WriteLineAsync($"{Row.Number}. {Row.Text}");
-
-                var nextLine = await chunkReaders[ChunkIndex].ReadLineAsync();
-
-                if (nextLine == null)
-                {
-                    continue;
-                }
-
-                var nextRow = ParseLine(nextLine)!.Value; // should not have bad rows anymore
-                priorityQueue.Enqueue((nextRow, ChunkIndex), nextRow);
-            }
+            progress?.Report(100);
         }
         finally
         {
-            foreach (var reader in chunkReaders)
+            foreach (var reader in readers)
             {
                 reader.Dispose();
             }
         }
-    }
 
-    private static long GetFileSize(string filePath)
-    {
-        long fileSize = 0;
-        if (File.Exists(filePath))
+        async Task EnqueueNextRowAsync(int chunkIndex)
         {
-            FileInfo info = new FileInfo(filePath);
-            fileSize = info.Length;
+            var line = await readers[chunkIndex].ReadLineAsync();
+            if (line is null)
+            {
+                return;
+            }
+
+            // chunk files are written by this class from already validated rows
+            if (!DataRow.TryParse(line, out var row))
+            {
+                throw new InvalidDataException($"Chunk file '{chunks.Paths[chunkIndex]}' contains a malformed line.");
+            }
+
+            queue.Enqueue((row, chunkIndex), row);
         }
-
-        return fileSize;
-    }
-
-    private static DataRow? ParseLine(string line)
-    {
-        // split on the first ". " only - text itself may contain ". "
-        var parts = line.Split(". ", 2);
-
-        if (parts.Length < 2 || !ulong.TryParse(parts[0], out var number))
-        {
-            return null; // reject bad rows
-        }
-
-        var text = parts[1].Trim();
-        return new DataRow(number, text);
     }
 
     public void Dispose()
     {
-        if (Directory.Exists(_tempFilesDirectory))
+        if (Directory.Exists(WorkingDirectory))
         {
-            Directory.Delete(_tempFilesDirectory, recursive: true);
+            Directory.Delete(WorkingDirectory, recursive: true);
         }
     }
 }

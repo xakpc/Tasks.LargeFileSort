@@ -1,26 +1,21 @@
-﻿using Spectre.Console;
+﻿using System.Diagnostics;
+using Spectre.Console;
 using Xakpc.Tasks.LargeFileSort.Generator.Services;
 
-const string wordsDictionary = "google-10000-english-no-swears.txt";
-const string filePath = "..\\..\\..\\..\\..\\build\\input-100GB.txt";
+const long BytesPerMegabyte = 1024 * 1024;
+const string WordsDictionary = "google-10000-english-no-swears.txt";
 
-// read words dict
-var words = await File.ReadAllLinesAsync(wordsDictionary);
+// generated files go to the repository's build folder: build/bin/<project>/<configuration>/<tfm>/ -> build/
+var outputDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
+var sizeMegabytes = AnsiConsole.Prompt(
+    new TextPrompt<long>("Enter file size in [green]MB[/] (1 MB = 1,048,576 bytes):")
+        .Validate(size => size > 0, "Size must be greater than 0."));
 
-var finalFileSizeMB = AnsiConsole.Ask<ulong>("Enter desired file size in [green]decimal MB[/]:");
-
-if (finalFileSizeMB <= 0)
-{
-    AnsiConsole.Write(new Text("File size must be greater than 0.", 
-        new Style(foreground: Color.Red)));
-    return;
-}
-
-ulong fileSizeBytes = finalFileSizeMB * 1024 * 1024;
-
-var spinner = AnsiConsole.Status()
-    .Spinner(Spinner.Known.Dots);
+var outputFilePath = Path.Combine(outputDirectory, $"input-{sizeMegabytes}MB.txt");
+var words = await File.ReadAllLinesAsync(Path.Combine(AppContext.BaseDirectory, WordsDictionary));
+var fileSizeBytes = sizeMegabytes * BytesPerMegabyte;
+var stopwatch = Stopwatch.StartNew();
 
 var result = AnsiConsole.Progress()
     .Columns(
@@ -28,17 +23,16 @@ var result = AnsiConsole.Progress()
         new TaskDescriptionColumn(),
         new ProgressBarColumn(),
         new PercentageColumn(),
-        new RemainingTimeColumn(),
+        new ElapsedTimeColumn(),
         new SpinnerColumn()
     ])
     .Start(ctx =>
     {
-        var generate = ctx.AddTask("Generating", maxValue: fileSizeBytes);
-        var progress = new Progress<double>(value => generate.Value = value);
-        var generator = new PhraseGenerator(words, filePath, fileSizeBytes);
-        return generator.Generate(progress);
+        var task = ctx.AddTask("Generating", maxValue: fileSizeBytes);
+        var generator = new PhraseGenerator(words, outputFilePath, fileSizeBytes);
+        return generator.Generate(new Progress<double>(value => task.Value = value));
     });
 
-var multiLine = new Text($"File created at {filePath}\nSize: {result.Size/(1024*1024)} MB\nNumber of lines: {result.Lines}\nNumber of duplicates: {result.Dupes}");
-AnsiConsole.Write(multiLine);
-AnsiConsole.Write(Text.NewLine);
+AnsiConsole.MarkupLineInterpolated($"File created at {outputFilePath} in {stopwatch.Elapsed:hh\\:mm\\:ss\\.fff}");
+AnsiConsole.MarkupLineInterpolated($"Size: {result.SizeBytes / BytesPerMegabyte:N0} MB ({result.SizeBytes:N0} bytes)");
+AnsiConsole.MarkupLineInterpolated($"Lines: {result.Lines:N0}, of which {result.RepeatedLines:N0} reuse an earlier String part");

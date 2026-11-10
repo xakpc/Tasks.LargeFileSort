@@ -1,0 +1,19 @@
+{
+  "profiles": {
+    "Sort 1GB": {
+      "commandName": "Project",
+      "commandLineArgs": "../../build/input-1GB.txt ../../build/output-1GB-sorted.txt",
+      "workingDirectory": "$(ProjectDir)"
+    },
+    "Sort 10GB": {
+      "commandName": "Project",
+      "commandLineArgs": "../../build/input-10GB.txt ../../build/output-10GB-sorted.txt",
+      "workingDirectory": "$(ProjectDir)"
+    },
+    "Sort 100GB": {
+      "commandName": "Project",
+      "commandLineArgs": "../../build/input-100GB.txt ../../build/output-100GB-sorted.txt",
+      "workingDirectory": "$(ProjectDir)"
+    }
+  }
+}

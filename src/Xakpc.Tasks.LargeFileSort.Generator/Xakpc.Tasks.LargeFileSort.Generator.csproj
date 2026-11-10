@@ -14,14 +14,12 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Xakpc.Tasks.LargeFileSort.Tests" />
+    <InternalsVisibleTo Include="Xakpc.Tasks.LargeFileSort.Benchmarks" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="google-10000-english-no-swears.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="words.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 

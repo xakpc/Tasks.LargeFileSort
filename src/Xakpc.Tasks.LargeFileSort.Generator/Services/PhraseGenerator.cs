@@ -1,127 +1,112 @@
-﻿using System.Diagnostics;
+﻿using System.Text;
 
 namespace Xakpc.Tasks.LargeFileSort.Generator.Services;
 
-interface IPhraseGenerator
+/// <summary>
+/// Writes a test file of lines in the format <c>&lt;Number&gt;. &lt;String&gt;</c> where the String part is
+/// a phrase of 1-3 random words. About 10% of the lines reuse an earlier phrase so the file always contains
+/// repeated String parts. Output is deterministic for the same inputs.
+/// </summary>
+internal sealed class PhraseGenerator
 {
-    /// <summary>
-    /// Generate test file with random words and phrases, reporting progress as a percentage of the total file size.
-    /// </summary>
-    GenerateResult Generate(IProgress<double> progress);
-}
+    private const int Seed = 46;
+    private const double RepeatProbability = 0.1;
+    private const int RepeatPoolCapacity = 10_000;
 
-internal class PhraseGenerator : IPhraseGenerator
-{
+    private static readonly Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+    private static readonly int NewLineBytes = Utf8.GetByteCount(Environment.NewLine);
+
     private readonly string _filePath;
     private readonly string[] _words;
-    private readonly ulong _fileSizeBytes;
-    private readonly Random _random;
+    private readonly long _fileSizeBytes;
+    private readonly Random _random = new(Seed);
 
-    const int Seed = 46;
-
-    public PhraseGenerator(string[] words, string filePath, ulong fileSizeBytes)
+    /// <param name="words">Dictionary to build phrases from; blank entries are ignored.</param>
+    /// <param name="filePath">Output file; overwritten if it exists.</param>
+    /// <param name="fileSizeBytes">Minimum file size; generation stops after the line that reaches it.</param>
+    public PhraseGenerator(IEnumerable<string> words, string filePath, long fileSizeBytes)
     {
-        ArgumentNullException.ThrowIfNull(words, nameof(words));
-        if (words.Length==0)
+        ArgumentNullException.ThrowIfNull(words);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fileSizeBytes);
+
+        _words = words.Select(w => w.Trim()).Where(w => w.Length > 0).ToArray();
+        if (_words.Length == 0)
         {
-            throw new ArgumentException("Words array cannot be empty.", nameof(words));
+            throw new ArgumentException("Words must contain at least one non-blank entry.", nameof(words));
         }
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(fileSizeBytes, 0UL, nameof(fileSizeBytes));
 
         _filePath = filePath;
-        _words = words;
         _fileSizeBytes = fileSizeBytes;
-        _random = new Random(Seed);
     }
 
-    public GenerateResult Generate(IProgress<double> progress)
+    /// <param name="progress">Receives the number of bytes written so far.</param>
+    public GenerateResult Generate(IProgress<double>? progress)
     {
-        using var streamWriter = new StreamWriter(_filePath, append: false);
-        var progressStep = _fileSizeBytes / 100.0; // Update progress every 1% of the file size
-        var currentProgress = 0.0;
-        var currentFileSize = 0UL;
-        var step = 0UL;
-        var dupesCount = 0;
+        using var writer = new StreamWriter(_filePath, append: false, Utf8);
+        var repeatPool = new List<string>(RepeatPoolCapacity);
+        var reportEvery = Math.Max(1L, _fileSizeBytes / 100);
+        var nextReport = reportEvery;
+        var writtenBytes = 0L;
+        var lines = 0L;
+        var repeatedLines = 0L;
 
-        const int repeatWordsPoolCapacity = 10000;
-        var randomWordsToRepeat = new List<string>(repeatWordsPoolCapacity);
-
-        while (currentFileSize < _fileSizeBytes)
+        while (writtenBytes < _fileSizeBytes)
         {
-            var number = PermutateRandomUniqueNumber(step, Seed);
-            string randomWord;
-
-            // choose a random word from the pool of previously generated words to repeat
-            if (randomWordsToRepeat.Count > 0 && _random.NextDouble() < 0.1) // 10% chance to repeat a word
+            string phrase;
+            if (repeatPool.Count > 0 && _random.NextDouble() < RepeatProbability)
             {
-                dupesCount++;
-                randomWord = $"{number}. " + randomWordsToRepeat[_random.Next(randomWordsToRepeat.Count)];
+                phrase = repeatPool[_random.Next(repeatPool.Count)];
+                repeatedLines++;
             }
             else
             {
-                var randomPhrase = BuildRandomPhrase(_words);
-
-                if (randomWordsToRepeat.Count < repeatWordsPoolCapacity)
+                phrase = BuildRandomPhrase();
+                if (repeatPool.Count < RepeatPoolCapacity)
                 {
-                    randomWordsToRepeat.Add(randomPhrase);
+                    repeatPool.Add(phrase);
                 }
-
-                randomWord = $"{number}. {randomPhrase}";
             }
 
-            streamWriter.Write(randomWord + Environment.NewLine);
+            var line = $"{UniqueNumber(lines)}. {phrase}";
+            writer.WriteLine(line);
+            writtenBytes += Utf8.GetByteCount(line) + NewLineBytes;
+            lines++;
 
-            currentFileSize += (ulong)(randomWord.Length + Environment.NewLine.Length);
-            step++;
-
-            currentProgress = UpdateProgress(progress, progressStep, currentProgress, currentFileSize);
-        }
-
-        // report 100%
-        progress.Report(currentFileSize);
-        return new GenerateResult(step, currentFileSize, dupesCount);
-
-        static double UpdateProgress(IProgress<double> progress, double progressStep, double currentProgress, 
-            ulong currentFileSize)
-        {
-            // report progress if we've crossed the next progress step
-            if (currentFileSize > currentProgress + progressStep)
+            if (writtenBytes >= nextReport)
             {
-                Debug.WriteLine($"Current file size: {currentFileSize} bytes, Progress: {currentProgress + progressStep} bytes");
-                currentProgress += progressStep;
-                progress.Report(currentProgress);
+                progress?.Report(Math.Min(writtenBytes, _fileSizeBytes));
+                nextReport += reportEvery;
             }
-
-            return currentProgress;
         }
+
+        progress?.Report(_fileSizeBytes);
+        return new GenerateResult(lines, writtenBytes, repeatedLines);
     }
 
-    string BuildRandomPhrase(string[] words)
+    private string BuildRandomPhrase()
     {
-        var length = _random.Next(1, 4);
-
-        var phrase = new List<string>();
-
-        for (int i = 0; i < length; i++)
+        var wordCount = _random.Next(1, 4);
+        var phrase = new string[wordCount];
+        for (var i = 0; i < wordCount; i++)
         {
-            phrase.Add(words[_random.Next(words.Length)]);
+            phrase[i] = _words[_random.Next(_words.Length)];
         }
 
-        return string.Join(" ", phrase);
+        return string.Join(' ', phrase);
     }
 
     /// <summary>
-    /// SplitMix64 permutation to get unique number based on index
+    /// SplitMix64 finalizer: a bijection on 64-bit values, so every line index maps to a distinct,
+    /// random-looking number.
     /// </summary>
-    static ulong PermutateRandomUniqueNumber(ulong index, ulong seed)
+    private static ulong UniqueNumber(long index)
     {
         unchecked
         {
-            ulong x = index + seed;
-
+            var x = (ulong)index + Seed;
             x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9UL;
             x = (x ^ (x >> 27)) * 0x94D049BB133111EBUL;
-
             return x ^ (x >> 31);
         }
     }
