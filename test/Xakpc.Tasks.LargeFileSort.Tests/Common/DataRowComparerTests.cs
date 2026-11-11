@@ -1,6 +1,6 @@
-using Xakpc.Tasks.LargeFileSort.Services;
+using Xakpc.Tasks.LargeFileSort.Common;
 
-namespace Xakpc.Tasks.LargeFileSort.Tests;
+namespace Xakpc.Tasks.LargeFileSort.Tests.Common;
 
 public class DataRowComparerTests
 {

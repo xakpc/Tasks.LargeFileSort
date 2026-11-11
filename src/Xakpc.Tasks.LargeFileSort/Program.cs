@@ -1,6 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Spectre.Console;
-using Xakpc.Tasks.LargeFileSort.Services;
+using Xakpc.Tasks.LargeFileSort.Chunking;
+using Xakpc.Tasks.LargeFileSort.Merging;
 
 if (args.Length != 2)
 {
@@ -23,7 +24,7 @@ if (string.Equals(inputFilePath, outputFilePath, StringComparison.OrdinalIgnoreC
     return 1;
 }
 
-var staleDirectories = SortingService.DeleteStaleWorkingDirectories();
+var staleDirectories = ChunkWorkspace.DeleteStale();
 if (staleDirectories > 0)
 {
     AnsiConsole.MarkupLineInterpolated($"Removed {staleDirectories} temp folder(s) left by interrupted runs.");
@@ -46,14 +47,15 @@ AnsiConsole.Progress()
         var build = ctx.AddTask("Building sorted chunks");
         var merge = ctx.AddTask("Merging chunks", autoStart: false);
 
-        using var sortingService = new SortingService();
+        using var workspace = new ChunkWorkspace();
+        // benchmarks on 1 GB: no gain beyond 8 workers (reading and the merge are single-threaded), only more memory
+        var workers = Math.Min(Environment.ProcessorCount, 8);
+        var chunkBuilder = new ChunkBuilder(workspace, workers, chunkSize: 128 * 1024 * 1024);
 
-        chunks = sortingService.BuildSortedChunks(
-            inputFilePath, new Progress<double>(value => build.Value = value));
+        chunks = chunkBuilder.Build(inputFilePath, new Progress<double>(value => build.Value = value));
 
         merge.StartTask();
-        sortingService.MergeChunks(
-            chunks, outputFilePath, new Progress<double>(value => merge.Value = value));
+        ChunkMerger.Merge(chunks, outputFilePath, new Progress<double>(value => merge.Value = value));
     });
 
 AnsiConsole.MarkupLineInterpolated($"Sorted {chunks.LineCount:N0} lines using {chunks.Paths.Count} chunks in {stopwatch.Elapsed:hh\\:mm\\:ss\\.fff}.");

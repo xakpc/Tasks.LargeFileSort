@@ -1,4 +1,4 @@
-﻿namespace Xakpc.Tasks.LargeFileSort.Generator.Services;
+namespace Xakpc.Tasks.LargeFileSort.Generator.Generation;
 
 /// <param name="Lines">Number of lines written.</param>
 /// <param name="SizeBytes">Size of the written file in bytes.</param>

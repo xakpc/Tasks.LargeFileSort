@@ -1,4 +1,4 @@
-﻿namespace Xakpc.Tasks.LargeFileSort.Services;
+namespace Xakpc.Tasks.LargeFileSort.Common;
 
 /// <summary>
 /// Orders rows by <see cref="DataRow.Text"/>, then by <see cref="DataRow.Number"/> ascending.

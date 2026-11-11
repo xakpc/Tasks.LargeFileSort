@@ -1,6 +1,6 @@
-﻿using System.Text;
+using System.Text;
 
-namespace Xakpc.Tasks.LargeFileSort.Generator.Services;
+namespace Xakpc.Tasks.LargeFileSort.Generator.Generation;
 
 /// <summary>
 /// Writes a test file of lines in the format <c>&lt;Number&gt;. &lt;String&gt;</c> where the String part is

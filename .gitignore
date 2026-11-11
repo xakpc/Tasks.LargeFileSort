@@ -370,3 +370,8 @@ TestMedia
 
 # The dev database and backups of scripts/dev-sidecar.ps1.
 /build/dev/
+build
+*.pdf
+
+# Build output, generated test files and benchmark results (input files can be ~100 GB).
+/build/

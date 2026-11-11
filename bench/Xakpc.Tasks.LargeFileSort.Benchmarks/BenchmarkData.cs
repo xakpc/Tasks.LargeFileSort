@@ -1,4 +1,4 @@
-using Xakpc.Tasks.LargeFileSort.Generator.Services;
+using Xakpc.Tasks.LargeFileSort.Generator.Generation;
 
 namespace Xakpc.Tasks.LargeFileSort.Benchmarks;
 

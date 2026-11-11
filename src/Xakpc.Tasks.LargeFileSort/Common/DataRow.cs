@@ -1,4 +1,4 @@
-﻿namespace Xakpc.Tasks.LargeFileSort.Services;
+namespace Xakpc.Tasks.LargeFileSort.Common;
 
 /// <summary>
 /// One line of the input file in the format <c>&lt;Number&gt;. &lt;String&gt;</c>.

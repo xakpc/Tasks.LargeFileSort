@@ -1,6 +1,6 @@
-using Xakpc.Tasks.LargeFileSort.Generator.Services;
+using Xakpc.Tasks.LargeFileSort.Generator.Generation;
 
-namespace Xakpc.Tasks.LargeFileSort.Tests;
+namespace Xakpc.Tasks.LargeFileSort.Tests.Generation;
 
 [Trait("Category", "Integration")]
 public class GeneratorTests

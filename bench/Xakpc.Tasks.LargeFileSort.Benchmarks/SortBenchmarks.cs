@@ -1,25 +1,26 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
-using Xakpc.Tasks.LargeFileSort.Services;
+using Xakpc.Tasks.LargeFileSort.Chunking;
+using Xakpc.Tasks.LargeFileSort.Merging;
 
 namespace Xakpc.Tasks.LargeFileSort.Benchmarks;
 
 /// <summary>
-/// End-to-end sort of a generated file. Each operation takes seconds, so a few monitored iterations are enough.
+/// End-to-end sort of a generated file with different numbers of workers.
+/// Each operation takes seconds, so a few monitored iterations are enough.
 /// </summary>
 [MemoryDiagnoser]
+[GcServer(true)] // same GC mode as the sorter app
 [SimpleJob(RunStrategy.Monitoring, launchCount: 1, warmupCount: 1, iterationCount: 3)]
 public class SortBenchmarks
 {
+    private const int BytesPerMegabyte = 1024 * 1024;
+
     private string _inputFilePath = null!;
     private string _outputFilePath = null!;
 
-    [Params(1024, 5120)]
+    [Params(1024)]
     public int SizeMB { get; set; }
-
-    /// <summary>Chunk size in millions of characters (~MB for ASCII input).</summary>
-    [Params(64, 256, 512, 1024)]
-    public int ChunkSizeMB { get; set; }
 
     [GlobalSetup]
     public void GlobalSetup()
@@ -31,11 +32,17 @@ public class SortBenchmarks
     [IterationCleanup]
     public void IterationCleanup() => File.Delete(_outputFilePath);
 
+    /// <summary>Chunks must outnumber workers, otherwise some workers have nothing to sort.</summary>
     [Benchmark]
-    public void Sort()
+    [Arguments(1, 128)]
+    [Arguments(2, 128)]
+    [Arguments(4, 128)]
+    [Arguments(8, 128)]
+    [Arguments(16, 64)]
+    public void Sort(int workers, int chunkSizeMB)
     {
-        using var sorter = new SortingService(ChunkSizeMB * 1024 * 1024);
-        var chunks = sorter.BuildSortedChunks(_inputFilePath, null);
-        sorter.MergeChunks(chunks, _outputFilePath, null);
+        using var workspace = new ChunkWorkspace();
+        var chunks = new ChunkBuilder(workspace, workers, chunkSizeMB * BytesPerMegabyte).Build(_inputFilePath, null);
+        ChunkMerger.Merge(chunks, _outputFilePath, null);
     }
 }

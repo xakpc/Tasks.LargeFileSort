@@ -1,6 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Spectre.Console;
-using Xakpc.Tasks.LargeFileSort.Generator.Services;
+using Xakpc.Tasks.LargeFileSort.Generator.Generation;
 
 const long BytesPerMegabyte = 1024 * 1024;
 const string WordsDictionary = "google-10000-english-no-swears.txt";

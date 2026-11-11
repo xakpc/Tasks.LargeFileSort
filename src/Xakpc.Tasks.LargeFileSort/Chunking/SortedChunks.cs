@@ -1,4 +1,4 @@
-﻿namespace Xakpc.Tasks.LargeFileSort.Services;
+namespace Xakpc.Tasks.LargeFileSort.Chunking;
 
 /// <summary>Result of splitting the input into sorted chunk files.</summary>
 /// <param name="Paths">Sorted chunk files, in creation order.</param>
